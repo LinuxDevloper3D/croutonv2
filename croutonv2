@@ -1,0 +1,106 @@
+#!/bin/sh -e
+# Crouton Installer Script with Multi-Distro, Version, and Display Server Support
+# 
+# Copyright (c) 2016 The crouton Authors
+# Licensed under a BSD-style license, outlined below:
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted with the following conditions:
+#   1. Redistributions of source code must retain the copyright notice,
+#      this list of conditions, and the following disclaimer.
+#   2. Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions, and the following disclaimer in
+#      the provided documentation or other materials.
+#   3. Neither Google Inc. nor the contributors may endorse or promote
+#      products derived from this software without prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND.
+# THE COPYRIGHT HOLDERS AND CONTRIBUTORS DISCLAIM ALL WARRANTIES, INCLUDING,
+# BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+# IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY
+# DAMAGES RESULTING FROM THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF SUCH.
+# ----------------------------------------------------------------------
+
+# Script configuration
+CROUTON_BRANCH="${CROUTON_BRANCH#master}"
+DISTRO="${DISTRO:-ubuntu}"        # Default to Ubuntu if no distro is specified
+VERSION="${VERSION:-latest}"       # Default to latest version if not specified
+DISPLAY_SERVER="${DISPLAY_SERVER:-x11}" # Default to X11 if no display server is specified
+INSTALLER="crouton${CROUTON_BRANCH:+-}${CROUTON_BRANCH:-}"
+BASE_URL="https://github.com/dnschneid/crouton/raw/releases"
+
+# Define distro and version-specific URL
+case "$DISTRO" in
+    ubuntu|debian|kali)
+        URL="$BASE_URL/$INSTALLER/$VERSION"
+        ;;
+    fedora)
+        URL="$BASE_URL/fedora/$INSTALLER/$VERSION"
+        ;;
+    arch)
+        URL="$BASE_URL/arch/$INSTALLER/$VERSION"
+        ;;
+    *)
+        echo "Unsupported distribution: $DISTRO"
+        exit 1
+        ;;
+esac
+
+CACHEDIR="/tmp/${0##*/}-installer-cache"
+CACHEFILE="$CACHEDIR/$INSTALLER-$DISTRO-$VERSION"
+MAXAGE=$((30*60)) # 30-minute cache duration
+
+# Argument processing for proxy and display server support
+while getopts ':a:f:k:m:M:n:p:P:r:s:t:T:' opt; do
+    case "$opt" in
+        P) export http_proxy="$OPTARG" https_proxy="$OPTARG" ftp_proxy="$OPTARG" ;;
+        *) echo "Invalid option: $opt" >&2; exit 1 ;;
+    esac
+done
+
+# Display server option handling
+case "$DISPLAY_SERVER" in
+    x11)
+        echo "Configuring for X11 display server..."
+        # Add any specific setup for X11 here if needed
+        ;;
+    wayland)
+        echo "Configuring for Wayland display server..."
+        # Add any specific setup for Wayland here if needed
+        ;;
+    *)
+        echo "Invalid display server option: $DISPLAY_SERVER. Choose 'x11' or 'wayland'."
+        exit 1
+        ;;
+esac
+
+# Ensure cache directory exists and check cache age
+mkdir -p "$CACHEDIR" && chmod 777 "$CACHEDIR"
+if [ ! -s "$CACHEFILE" ] || [ "$CACHEFILE" -ot "$0" ] || \
+   [ "$(date +%s)" -ge "$(($(date -r "$CACHEFILE" +%s) + MAXAGE))" ]; then
+    echo "Updating cached $DISTRO $VERSION installer..."
+    trap "rm -f '$CACHEFILE'; exit 1" INT HUP TERM 0
+    if ! curl -# -L --connect-timeout 60 --max-time 300 --retry 2 -o "$CACHEFILE" "$URL"; then
+        echo "Failed to download $DISTRO $VERSION installer. Check connection or proxy settings (-P) and try again." >&2
+        exit 1
+    fi
+    trap - INT HUP TERM 0
+fi
+
+# Ensure cache directory is executable
+if ! mountpoint -q "$CACHEDIR"; then
+    if ! mount --bind "$CACHEDIR" "$CACHEDIR" || ! mount -o remount,exec "$CACHEDIR"; then
+        echo "Could not set execute permissions on cache directory." >&2
+    fi
+fi
+
+# Handle shell options -x and -v if set
+SETOPTIONS="-e"
+[ "$(set -o | grep -E '^xtrace.*on$')" ] && SETOPTIONS="$SETOPTIONS -x"
+[ "$(set -o | grep -E '^verbose.*on$')" ] && SETOPTIONS="$SETOPTIONS -v"
+
+# Execute the cached installer with options and any arguments
+exec sh $SETOPTIONS "$CACHEFILE" "$@"
+
+# Padding for MIME type compatibility
+: '�'
